@@ -1,0 +1,8 @@
+{
+  "finnhubKey": "test123",
+  "newsApiKey": "test456",
+  "tradingEconomicsUser": "testuser",
+  "tradingEconomicsKey": "testkey",
+  "fxFactoryRss": "testrss",
+  "aliases": {}
+}

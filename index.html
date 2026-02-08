@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Fundamental AI Analyst — GOLD, SILVER, USD30, NAS100, ES500</title>
+	<style>
+		:root{--bg:#071226;--card:#0b1628;--muted:#9fb0c8;--accent:#ff9f43;--glass:rgba(255,255,255,0.03)}
+		body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:18px auto;max-width:1200px;padding:18px;background:linear-gradient(180deg,#061025 0%, #071226 100%);color:#e6f0fb}
+		h1{font-size:20px;margin-bottom:6px;color:#fff}
+		.controls{margin-bottom:10px;display:flex;align-items:center;gap:10px}
+		button{padding:6px 10px;border-radius:8px;border:1px solid rgba(255,159,67,0.15);background:transparent;color:var(--accent);cursor:pointer;font-weight:600}
+		button:active{transform:translateY(1px)}
+		.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:12px}
+		.card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:16px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6);border:1px solid rgba(255,255,255,0.03);min-height:120px;display:flex;flex-direction:column}
+		table{width:100%;border-collapse:collapse;font-size:13px;color:var(--muted)}
+		td{padding:6px 4px;border-top:1px solid rgba(255,255,255,0.03)}
+		.symbol{font-weight:700;color:#fff}
+		.bio{margin-top:10px;padding:10px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:8px;font-size:13px;color:var(--muted)}
+		.muted{color:var(--muted);font-size:12px}
+		.symbol-line{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+		.conf{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+		.conf-bar{height:8px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden}
+		.conf-fill{height:100%;background:linear-gradient(90deg,var(--accent),#ffd27a);width:40%}
+		.conf-label{font-size:12px;color:var(--muted);margin-left:4px}
+		.ai-title{font-weight:700;color:#dbeefd;margin-top:10px;font-size:13px}
+		.ai-text{color:var(--muted);font-size:13px;margin-top:6px}
+		.headline-item{margin-top:8px;padding:10px;background:rgba(255,255,255,0.01);border-radius:8px;display:flex;flex-direction:column}
+		.headline-link{color:#dbeefd;text-decoration:none;font-weight:600}
+		.headline-meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;color:var(--muted);font-size:12px}
+		.time-ago{opacity:0.9}
+		.card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;margin-top:auto}
+		.updated{color:var(--muted);font-size:12px}
+		.sentiment{padding:6px 10px;border-radius:999px;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:8px}
+		.sentiment.bullish{background:linear-gradient(90deg, rgba(34,197,94,0.12), rgba(34,197,94,0.06));color:#a8f5c4}
+		.sentiment.bearish{background:linear-gradient(90deg, rgba(239,68,68,0.08), rgba(239,68,68,0.03));color:#ffb4b4}
+		.sentiment.neutral{background:linear-gradient(90deg, rgba(96,165,250,0.06), rgba(96,165,250,0.03));color:#cfe8ff}
+		.sentiment .dot{width:8px;height:8px;border-radius:50%}
+		.sentiment.bullish .dot{background:#16a34a}
+		.sentiment.bearish .dot{background:#ef4444}
+		.sentiment.neutral .dot{background:#06b6d4}
+		.conf-row{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+
+		/* Responsive tweaks */
+		@media (max-width:600px){
+			body{padding:12px;margin:12px auto}
+			.grid{gap:10px}
+			.card{padding:12px}
+			h1{font-size:18px}
+			.ai-text{font-size:13px}
+			button{padding:8px 10px}
+			.controls{flex-wrap:wrap}
+		}
+	</style>
+</head>
+<body>
+	<h1 aria-label="Fundamental AI Analyst - Trading Analytics Dashboard">Fundamental AI Analyst</h1>
+	<div class="controls" role="toolbar" aria-label="Main controls">
+		<span class="muted">Instruments:</span>
+		<button id="refresh" aria-label="Refresh all instrument data">Refresh</button>
+	</div>
+
+	<div id="status" class="muted" role="status" aria-live="assertive">Ready — click Refresh to fetch fundamentals.</div>
+
+	<div id="out" class="grid" style="margin-top:12px" role="region" aria-label="Instrument cards grid"></div>
+
+	<script>
+
+		const symbols = [
+			{key:'XAUUSD', name:'GOLD'},
+			{key:'XAGUSD', name:'SILVER'},
+			{key:'^DJI', name:'USD30'},
+			{key:'^NDX', name:'NAS100'},
+			{key:'^GSPC', name:'ES500'},
+			{key:'^GDAXI', name:'GER30'},
+			{key:'EURUSD=X', name:'EUR/USD'}
+		];
+
+		const out = document.getElementById('out');
+		const status = document.getElementById('status');
+		document.getElementById('refresh').addEventListener('click', fetchAll);
+
+		async function fetchNews(symbol){
+			try{
+				const r = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+				if(!r.ok) return [];
+				const j = await r.json();
+				return j.data || [];
+			}catch(e){return []}
+		}
+
+		async function fetchEcon(){
+			try{
+				const r = await fetch(`/api/econ`);
+				if(!r.ok) return [];
+				const j = await r.json();
+				return j.data || [];
+			}catch(e){return []}
+		}
+
+		function fmt(n, digits=2){ if(n==null) return '—'; const abs=Math.abs(n); if(abs>=1e12) return (n/1e12).toFixed(digits)+'T'; if(abs>=1e9) return (n/1e9).toFixed(digits)+'B'; if(abs>=1e6) return (n/1e6).toFixed(digits)+'M'; return Number(n).toFixed(digits); }
+
+		async function fetchAll(){
+			status.textContent = 'Fetching fundamentals...';
+			out.innerHTML='';
+			for(const s of symbols){
+				const card = document.createElement('div'); card.className='card'; out.appendChild(card);
+				card.innerHTML = `<div class="symbol">${s.name} <span class="muted">(${s.key})</span></div><div class="muted">Loading...</div>`;
+				try{
+					const d = await fetchFundamentals(s.key);
+					const news = await fetchNews(s.key);
+					const econ = await fetchEcon();
+					await renderCard(card, s, d, news, econ);
+				}catch(err){
+					card.innerHTML = `<div class="symbol">${s.name}</div><div class="muted">Error fetching data: ${err.message}</div>`;
+				}
+			}
+			status.textContent = 'Updated ' + new Date().toLocaleString();
+		}
+
+		async function fetchFundamentals(symbol){
+			const modules = ['price','summaryDetail','financialData','defaultKeyStatistics'].join(',');
+
+			// Try local proxy first (/api/quote) to avoid CORS issues when running the Node server.
+			try{
+				const proxyUrl = `/api/quote?symbol=${encodeURIComponent(symbol)}`;
+				const proxyRes = await fetch(proxyUrl);
+				if(proxyRes.ok){
+					const proxyJson = await proxyRes.json();
+					// v10/quoteSummary returns { quoteSummary: { result: [...] } }
+					if(proxyJson.quoteSummary && proxyJson.quoteSummary.result) return proxyJson.quoteSummary.result[0];
+					// v7/quote returns { quoteResponse: { result: [...] } }
+					if(proxyJson.quoteResponse && proxyJson.quoteResponse.result) return { _v7: true, raw: proxyJson.quoteResponse.result[0] };
+					// Finnhub returns { finnhub: true, data: {...} }
+					if(proxyJson.finnhub && proxyJson.data) return { _finnhub: true, raw: proxyJson.data };
+					// Mock/demo data returns { mock: true, data: {...} }
+					if(proxyJson.mock && proxyJson.data) return { _mock: true, raw: proxyJson.data };
+				}
+			}catch(e){
+				console.warn('Proxy fetch failed, falling back to direct fetch', e);
+			}
+
+			// Fallback: direct fetch to Yahoo (may be blocked by CORS in the browser)
+			const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
+			const res = await fetch(url);
+			if(!res.ok) throw new Error(`HTTP ${res.status}`);
+			const json = await res.json();
+			if(!json.quoteSummary || !json.quoteSummary.result) throw new Error('No data');
+			return json.quoteSummary.result[0];
+		}
+
+		function safe(obj, path){ try{ return path.split('.').reduce((a,k)=>a&&a[k], obj);}catch(e){return undefined}}
+
+		async function renderCard(card, s, data, news, econ){
+			let price, change, changePct, prevClose, marketCap, pe, beta, recommendation;
+			if(data && data._finnhub && data.raw){
+				const raw = data.raw;
+				price = raw.c ?? null;
+				change = raw.d ?? null;
+				changePct = raw.dp ?? null;
+				prevClose = raw.pc ?? null;
+			} else if(data && data._mock && data.raw){
+				const raw = data.raw;
+				price = raw.c ?? null;
+				change = raw.d ?? null;
+				changePct = raw.dp ?? null;
+				prevClose = raw.pc ?? null;
+			} else if(data && data._v7 && data.raw){
+				const raw = data.raw;
+				price = raw.regularMarketPrice ?? null;
+				change = raw.regularMarketChange ?? null;
+				changePct = raw.regularMarketChangePercent ?? null;
+				prevClose = raw.regularMarketPreviousClose ?? raw.previousClose ?? null;
+				marketCap = raw.marketCap ?? null;
+				pe = raw.trailingPE ?? null;
+				beta = raw.beta ?? null;
+			} else {
+				price = safe(data,'price.regularMarketPrice.raw') ?? safe(data,'price.regularMarketPrice') ?? null;
+				change = safe(data,'price.regularMarketChange.raw') ?? safe(data,'price.regularMarketChange') ?? null;
+				changePct = safe(data,'price.regularMarketChangePercent.raw') ?? safe(data,'price.regularMarketChangePercent') ?? null;
+				prevClose = safe(data,'summaryDetail.previousClose.raw') ?? null;
+				marketCap = safe(data,'price.marketCap.raw') ?? safe(data,'defaultKeyStatistics.marketCap.raw') ?? null;
+				pe = safe(data,'defaultKeyStatistics.trailingPE.raw') ?? safe(data,'financialData.trailingPE.raw') ?? null;
+				beta = safe(data,'summaryDetail.beta') ?? safe(data,'price.beta') ?? null;
+				recommendation = safe(data,'financialData.recommendationMean.raw') ?? null;
+			}
+
+			const rows = [
+				['Price', price!=null? '$'+fmt(price,2):'—'],
+				['Change', change!=null? (change>0?'+':'')+fmt(change,2) + (changePct!=null?` (${fmt(changePct,2)}%)`:''):'—'],
+				['Previous Close', prevClose!=null? '$'+fmt(prevClose,2):'—'],
+				['Market Cap', marketCap!=null? fmt(marketCap,2): '—'],
+				['PE (trailing)', pe!=null? fmt(pe,2):'—'],
+				['Beta', beta!=null? fmt(beta,2):'—'],
+				['Analyst Rec', recommendation!=null? fmt(recommendation,2):'—']
+			];
+
+			let table = '<table>' + rows.map(r=>`<tr><td style="width:40%">${r[0]}</td><td>${r[1]}</td></tr>`).join('') + '</table>';
+
+				const bio = await generateBio(s.name, {price, change, changePct, marketCap, pe, beta, recommendation}, news, econ);
+
+			// derive sentiment and a confidence metric (confidence represents how strongly biased bullish/bearish)
+			let sentiment = 'neutral';
+			if(typeof changePct === 'number'){
+				if(changePct > 0.3) sentiment = 'bullish';
+				else if(changePct < -0.3) sentiment = 'bearish';
+				else sentiment = 'neutral';
+			}
+
+			let conf = 65;
+			if(typeof changePct === 'number'){
+				conf = Math.min(95, Math.max(25, 50 + Math.round(Math.min(45, Math.abs(changePct) * 8))));
+			}
+
+			const changeHtml = (changePct!=null)? `${change>0?'<span style="color:#7ef58f">▲</span>':''} ${fmt(changePct,2)}%` : '';
+
+			// color the fill according to sentiment
+			const fillColor = sentiment==='bullish' ? 'linear-gradient(90deg,#16a34a,#86efac)' : (sentiment==='bearish' ? 'linear-gradient(90deg,#ef4444,#ffb4b4)' : 'linear-gradient(90deg,#06b6d4,#9be7ff)');
+
+			card.innerHTML = `
+				<div class="symbol-line">
+					<div class="symbol">${s.name} <span class="muted">(${s.key})</span></div>
+					<div style="display:flex;align-items:center;gap:10px">
+						<div class="muted">${changeHtml}</div>
+						<div class="sentiment ${sentiment}"><div class="dot"></div>${sentiment.charAt(0).toUpperCase()+sentiment.slice(1)}</div>
+					</div>
+				</div>
+				${table}
+				<div class="conf-row">
+					<div class="muted">Confidence</div>
+					<div class="muted">${conf}%</div>
+				</div>
+				<div class="conf" style="margin-top:6px">
+					<div class="conf-bar"><div class="conf-fill" style="width:${conf}%;background:${fillColor}"></div></div>
+				</div>
+				<div class="ai-title">AI Analysis</div>
+				<div class="ai-text">${bio}</div>
+				${renderHeadlines(news)}
+				<div class="card-foot">
+					<div class="updated">Last update: ${new Date().toLocaleTimeString()}</div>
+					<div><button onclick="window.open('https://finance.yahoo.com/quote/${encodeURIComponent(s.key)}','_blank')">Deep Dive</button></div>
+				</div>
+			`;
+		}
+
+		// enhanced generateBio using ML sentiment analysis on news + econ context
+		async function generateBio(name, d, news, econ){
+			const base = [];
+			const price = d.price!=null? Number(d.price) : null;
+			base.push(price!=null? `${name} is trading at $${price.toFixed(2)}.` : `${name} price unavailable.`);
+
+			// Price momentum
+			if(d.changePct!=null){
+				const sign = d.changePct>0? 'up' : (d.changePct<0? 'down':'unchanged');
+				base.push(`Intraday % change: ${d.changePct.toFixed(2)}% (${sign}).`);
+			}
+
+			// ML-based news sentiment aggregation (weighted by recency, with fallback)
+			let newsSummary = '';
+			if(Array.isArray(news) && news.length>0){
+				let score = 0;
+				let totalWeight = 0;
+				const now = Date.now();
+				
+				// Analyze each headline with ML sentiment model (with timeout and error handling)
+				for(const h of news.slice(0,8)){
+					const headline = h.headline || '';
+					if(!headline.trim()) continue;
+					
+					// weight: recent headlines count more (within 7 days)
+					let age = 0;
+					try{ age = Math.max(0, (now - (new Date(h.datetime||h.publishedAt||now)).getTime())/1000); }catch(e){ age=0 }
+					const weight = Math.max(0.25, 1 - Math.min(age/(7*24*3600), 1));
+					
+					// Call ML sentiment endpoint with timeout
+					try{
+						const controller = new AbortController();
+						const timeout = setTimeout(() => controller.abort(), 2000); // 2s timeout
+						const r = await fetch('/api/sentiment', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text: headline}), signal: controller.signal});
+						clearTimeout(timeout);
+						if(r.ok){
+							const j = await r.json();
+							// j.comparative is normalized (-1 to 1), we scale it
+							const mlScore = (j.comparative || 0) * 5; // scale to roughly -5 to +5
+							score += mlScore * weight;
+							totalWeight += weight;
+						}
+					}catch(e){ 
+						console.warn('ML sentiment timeout/failed:', e.message);
+						// fallback to keyword-based quick check
+						const t = headline.toLowerCase();
+						const bullishWords = ['gain','up','rise','surge','strength','positive','strong','advance'];
+						const bearishWords = ['drop','down','fall','weak','miss','slump','negative','decline','recession'];
+						let local = 0;
+						for(const w of bullishWords){ if(t.includes(w)) local += 1; }
+						for(const w of bearishWords){ if(t.includes(w)) local -= 1; }
+						score += local * weight;
+						totalWeight += weight;
+					}
+				}
+				
+				const norm = totalWeight? (score/totalWeight) : 0;
+				if(norm > 0.3) newsSummary = 'Recent headlines lean bullish.';
+				else if(norm < -0.3) newsSummary = 'Recent headlines lean bearish.';
+				else newsSummary = 'News tone is mixed or neutral.';
+				base.push(newsSummary);
+			}
+
+			// Economic calendar context
+			if(Array.isArray(econ) && econ.length>0){
+				const now = Date.now();
+				const soon = now + 24*3600*1000; // 24h considered urgent
+				const high = econ.filter(ev => (ev.impact && String(ev.impact).toLowerCase()==='high') || (ev.importance && String(ev.importance).toLowerCase()==='high'));
+				const upcoming = high.filter(ev => {
+					const t = new Date(ev.date||ev.datetime||ev.eventDate||ev.Date || ev.startDate).getTime();
+					return !isNaN(t) && t <= soon;
+				});
+				if(upcoming && upcoming.length>0){
+					base.push(`High-impact economic events within 24h: ${upcoming.slice(0,3).map(e=>e.event||e.title||e.country).join(', ')}. Expect increased volatility.`);
+				} else if(high.length>0) {
+					base.push(`High-impact events upcoming: ${high.slice(0,3).map(e=>e.event||e.title||e.country).join(', ')}.`);
+				}
+			}
+
+			// Quick actionable opinion (tuned thresholds)
+			let opinion = 'Bias: neutral.';
+			if(d.changePct!=null){
+				if(d.changePct > 1.2) opinion = 'Bias: strongly bullish (momentum).';
+				else if(d.changePct > 0.35) opinion = 'Bias: bullish.';
+				else if(d.changePct < -1.2) opinion = 'Bias: strongly bearish (momentum).';
+				else if(d.changePct < -0.35) opinion = 'Bias: bearish.';
+			}
+
+			// combine signals from news
+			if(newsSummary){
+				if(newsSummary.includes('bullish') && opinion.includes('bearish')) opinion = 'Bias: mixed — headlines conflict with price momentum.';
+				else if(newsSummary.includes('bullish') && opinion.includes('neutral')) opinion = 'Bias: slightly bullish driven by news.';
+				else if(newsSummary.includes('bearish') && opinion.includes('neutral')) opinion = 'Bias: slightly bearish driven by news.';
+				else if(newsSummary.includes('bullish') && opinion.includes('bullish')) opinion = opinion + ' ML sentiment + price momentum aligned.';
+				else if(newsSummary.includes('bearish') && opinion.includes('bearish')) opinion = opinion + ' ML sentiment + price momentum aligned.';
+			}
+
+			base.push(opinion);
+			base.push('Note: AI analysis (ML + price + economic calendar) — validate with raw data before trading.');
+			return base.join(' ');
+		}
+
+		function renderHeadlines(news){
+			if(!news || !news.length) return '';
+			const items = news.slice(0,3).map(n=>{
+				const url = n.url || '#';
+				const src = n.source? escapeHtml(n.source): '';
+				const time = formatTime(n.datetime || n.publishedAt || Date.now());
+				return `<div class="headline-item"><a class="headline-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(n.headline)}</a><div class="headline-meta"><div>${src}</div><div class="time-ago">${timeAgo(n.datetime || n.publishedAt || Date.now())}</div></div></div>`;
+			}).join('');
+			return `<div style="margin-top:8px">${items}</div>`;
+		}
+
+		function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+		function formatTime(t){ try{ const dt = new Date(t); if(isNaN(dt)) return ''; return dt.toLocaleString(); }catch(e){return ''} }
+
+		function timeAgo(t){ try{ const then = new Date(t).getTime(); const diff = Math.floor((Date.now()-then)/1000); if(diff<60) return `${diff}s ago`; if(diff<3600) return `${Math.floor(diff/60)}m ago`; if(diff<86400) return `${Math.floor(diff/3600)}h ago`; return `${Math.floor(diff/86400)}d ago`; }catch(e){return ''} }
+
+		// initial fetch
+		fetchAll();
+	</script>
+</body>
+</html>
