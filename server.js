@@ -21,6 +21,37 @@ async function writeSettings(obj){
   try{ await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(obj, null, 2), 'utf8'); return true; }catch(e){ console.warn('Failed to write settings:', e.message); return false; }
 }
 
+// Load .env if present (optional)
+try{ require('dotenv').config(); }catch(e){ /* dotenv not installed — that's ok */ }
+
+// startup initializer: read settings, prefer env vars, and validate basic config
+async function startupInit(){
+  const settings = await readSettings();
+  const merged = {
+    finnhubKey: process.env.FINNHUB_KEY || settings.finnhubKey || '',
+    newsApiKey: process.env.NEWSAPI_KEY || settings.newsApiKey || '',
+    tradingEconomicsUser: process.env.TRADINGECONOMICS_USER || settings.tradingEconomicsUser || '',
+    tradingEconomicsKey: process.env.TRADINGECONOMICS_KEY || settings.tradingEconomicsKey || '',
+    fxFactoryRss: process.env.FXFACTORY_RSS || settings.fxFactoryRss || ''
+  };
+
+  console.log('Startup configuration summary:');
+  console.log(`  Finnhub key: ${merged.finnhubKey? '(present)':'(missing)'}`);
+  console.log(`  NewsAPI key: ${merged.newsApiKey? '(present)':'(missing)'}`);
+  console.log(`  TradingEconomics: ${merged.tradingEconomicsUser? '(present)':'(missing)'} / ${merged.tradingEconomicsKey? '(present)':'(missing)'} `);
+  console.log(`  FXFactory RSS: ${merged.fxFactoryRss? merged.fxFactoryRss : '(missing)'}`);
+
+  // basic sanity checks to help user get live data immediately
+  if(!merged.finnhubKey || merged.finnhubKey.toLowerCase().includes('test') || merged.finnhubKey.toLowerCase().includes('demo')){
+    console.warn('Warning: Finnhub API key missing or looks like a placeholder. Add a valid key via environment variable or POST to /api/settings.');
+  }
+  if(merged.fxFactoryRss && !/^https?:\/\//i.test(merged.fxFactoryRss)){
+    console.warn('Warning: fxFactoryRss does not look like a valid absolute URL and will likely fail. Use a full URL (https://...).');
+  }
+
+  // no mutation of files performed; endpoints still read settings dynamically
+}
+
 // Mock data for demo purposes
 function getMockData(symbol) {
   const mockQuotes = {
@@ -54,10 +85,11 @@ app.get('/api/quote', async (req, res) => {
     return res.status(400).json({ error: 'symbol query param required' });
   }
 
-  const finnhubKey = process.env.FINNHUB_KEY;
+  // prefer environment variables but fall back to persisted settings.json
+  const settings = await readSettings();
+  const finnhubKey = process.env.FINNHUB_KEY || settings.finnhubKey;
 
   // build list of candidate symbols to try (preserve request as `symbol`)
-  const settings = await readSettings();
   const mergedAliases = Object.assign({}, ALIASES, settings.aliases || {});
   const candidates = mergedAliases[symbol] || [symbol];
 
@@ -79,7 +111,24 @@ app.get('/api/quote', async (req, res) => {
     }
   }
 
-  // Fallback to mock data (Yahoo APIs require browser-only crumb token; skip for now)
+  // Server-side fallback: try Yahoo Finance quoteSummary (may succeed without API keys)
+  try {
+    const modules = ['price','summaryDetail','financialData','defaultKeyStatistics'].join(',');
+    const trySym = encodeURIComponent(candidates[0] || symbol);
+    const yUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${trySym}?modules=${modules}`;
+    const ry = await fetch(yUrl);
+    if (ry && ry.ok) {
+      const jy = await ry.json();
+      if (jy && jy.quoteSummary && jy.quoteSummary.result) {
+        console.log(`Yahoo success for ${symbol} (via ${candidates[0]||symbol})`);
+        return res.json(jy);
+      }
+    }
+  } catch (e) {
+    console.warn('Yahoo fetch failed:', e.message);
+  }
+
+  // Fallback to mock data (if all providers fail)
   return res.json({ mock: true, data: getMockData(symbol) });
 });
 
@@ -87,9 +136,11 @@ app.get('/api/quote', async (req, res) => {
 app.get('/api/news', async (req, res) => {
   const symbol = req.query.symbol;
   if (!symbol) return res.status(400).json({ error: 'symbol query param required' });
-  const finnhubKey = process.env.FINNHUB_KEY;
-  const newsApiKey = process.env.NEWSAPI_KEY;
-  const fxFactoryRss = process.env.FXFACTORY_RSS; // optional RSS URL
+  // prefer environment variables but fall back to persisted settings.json
+  const settings = await readSettings();
+  const finnhubKey = process.env.FINNHUB_KEY || settings.finnhubKey;
+  const newsApiKey = process.env.NEWSAPI_KEY || settings.newsApiKey;
+  const fxFactoryRss = process.env.FXFACTORY_RSS || settings.fxFactoryRss; // optional RSS URL
 
   const candidates = ALIASES[symbol] || [symbol];
 
@@ -154,8 +205,9 @@ app.get('/api/news', async (req, res) => {
 
 // Economic calendar endpoint: tries TradingEconomics if configured, otherwise returns mock events
 app.get('/api/econ', async (req, res) => {
-  const sourceUser = process.env.TRADINGECONOMICS_USER;
-  const sourceKey = process.env.TRADINGECONOMICS_KEY;
+  const settings = await readSettings();
+  const sourceUser = process.env.TRADINGECONOMICS_USER || settings.tradingEconomicsUser;
+  const sourceKey = process.env.TRADINGECONOMICS_KEY || settings.tradingEconomicsKey;
   if (sourceUser && sourceKey) {
     try {
       // TradingEconomics calendar (requires credentials)
@@ -232,4 +284,10 @@ function startServer(port, attemptsLeft) {
   });
 }
 
-startServer(START_PORT, 10);
+// run initialization then start server
+async function main(){
+  try{ await startupInit(); }catch(e){ console.warn('Startup validation failed:', e.message); }
+  startServer(START_PORT, 10);
+}
+
+main();
